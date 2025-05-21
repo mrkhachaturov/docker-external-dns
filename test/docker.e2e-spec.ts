@@ -1,3 +1,5 @@
+// allow dot notation to override private scoped variables for test cases
+/* eslint-disable @typescript-eslint/dot-notation */
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import {
@@ -17,6 +19,7 @@ import { validDnsCnameEntry } from '../src/dto/dnscname-entry.spec';
 import { validDnsMxEntry } from '../src/dto/dnsmx-entry.spec';
 import { DockerService } from '../src/docker/docker.service';
 import { validDnsNsEntry } from '../src/dto/dnsns-entry.spec';
+import { getConfigModuleImport } from '../src/app.configuration';
 
 describe('DockerService (Integration)', () => {
   const backupEnvironment = { ...process.env };
@@ -222,9 +225,9 @@ describe('DockerService (Integration)', () => {
     process.env = backupEnvironment;
   }, 3000000);
 
-  beforeEach(async () => {
+  async function initialize() {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
+      imports: [getConfigModuleImport(), AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
@@ -232,29 +235,64 @@ describe('DockerService (Integration)', () => {
 
     sut = app.get(DockerService);
     sut.initialize();
-  });
+  }
 
   let fetchedContainers: Dockerode.ContainerInfo[];
 
-  it('should list containers with matching labels', async () => {
-    // act
-    fetchedContainers = await sut.getContainers();
+  describe('fetch containers tests', () => {
+    beforeAll(async () => {
+      await containerInstances.Invalid.stop({ remove: false });
+      await containerInstances.MX.stop({ remove: false });
+    });
 
-    // assert
-    expect(fetchedContainers).toHaveLength(10);
-    expect(fetchedContainers[0].Names[0]).toContain('Empty');
-    expect(fetchedContainers[1].Names[0]).toContain('DNSInvalid');
-    expect(fetchedContainers[2].Names[0]).toContain('DNSDuplicate2');
-    expect(fetchedContainers[3].Names[0]).toContain('DNSNS');
-    expect(fetchedContainers[4].Names[0]).toContain('DNSMX');
-    expect(fetchedContainers[5].Names[0]).toContain('DNSMultiLabel');
-    expect(fetchedContainers[6].Names[0]).toContain('DNSDuplicate1');
-    expect(fetchedContainers[7].Names[0]).toContain('DNSCNAME');
-    expect(fetchedContainers[8].Names[0]).toContain('DNSAMultiLabel');
-    expect(fetchedContainers[9].Names[0]).toContain('DNSA');
+    it('should list containers with matching labels excluding stopped', async () => {
+      // arrange
+      process.env.PRESERVE_STOPPED = 'false';
+      await initialize();
+
+      // act
+      fetchedContainers = await sut.getContainers();
+
+      // assert
+      expect(fetchedContainers).toHaveLength(8);
+      expect(fetchedContainers[0].Names[0]).toContain('Empty');
+      expect(fetchedContainers[1].Names[0]).toContain('DNSDuplicate2');
+      expect(fetchedContainers[2].Names[0]).toContain('DNSNS');
+      expect(fetchedContainers[3].Names[0]).toContain('DNSMultiLabel');
+      expect(fetchedContainers[4].Names[0]).toContain('DNSDuplicate1');
+      expect(fetchedContainers[5].Names[0]).toContain('DNSCNAME');
+      expect(fetchedContainers[6].Names[0]).toContain('DNSAMultiLabel');
+      expect(fetchedContainers[7].Names[0]).toContain('DNSA');
+    });
+
+    it('should list containers with matching labels including stopped', async () => {
+      // arrange
+      process.env.PRESERVE_STOPPED = 'true';
+      await initialize();
+
+      // act
+      fetchedContainers = await sut.getContainers();
+
+      // assert
+      expect(fetchedContainers).toHaveLength(10);
+      expect(fetchedContainers[0].Names[0]).toContain('Empty');
+      expect(fetchedContainers[1].Names[0]).toContain('DNSInvalid');
+      expect(fetchedContainers[2].Names[0]).toContain('DNSDuplicate2');
+      expect(fetchedContainers[3].Names[0]).toContain('DNSNS');
+      expect(fetchedContainers[4].Names[0]).toContain('DNSMX');
+      expect(fetchedContainers[5].Names[0]).toContain('DNSMultiLabel');
+      expect(fetchedContainers[6].Names[0]).toContain('DNSDuplicate1');
+      expect(fetchedContainers[7].Names[0]).toContain('DNSCNAME');
+      expect(fetchedContainers[8].Names[0]).toContain('DNSAMultiLabel');
+      expect(fetchedContainers[9].Names[0]).toContain('DNSA');
+    });
   });
 
   it('should parse the listed containers, skipping the invalid and empty ones', async () => {
+    // arrange
+    process.env.PRESERVE_STOPPED = 'false';
+    await initialize();
+
     // act
     const parsedContainers = sut.extractDNSEntries(fetchedContainers);
 
